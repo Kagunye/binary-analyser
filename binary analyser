@@ -1,0 +1,81 @@
+const fetch = require("node-fetch");
+const readline = require('readline');
+
+// Function to convert JSON to query string
+function jsonToQueryString(json) {
+  return Object.keys(json)
+    .map((key) => encodeURIComponent(key) + "=" + encodeURIComponent(json[key]))
+    .join("&");
+}
+
+const symbol = "R_100";
+const duration = "1m";
+const intervals = [10, 50, 75, 100];
+const intervalDuration = "1s";
+
+// Deriv API endpoint
+const apiEndpoint = "https://api.deriv.com/binary/comet/v3/ticks";
+
+// Create a readline interface to read user input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Function to analyze the ticks data
+async function analyzeTicksData(ticksData) {
+  const percentages = intervals.map((interval) => {
+    const tickSlice = ticksData.slice(-interval);
+    const riseCount = tickSlice.filter((tick, index) => {
+      if (index === 0) return false;
+      return tick > tickSlice[index - 1];
+    }).length;
+    const fallCount = interval - riseCount;
+    return Math.round((riseCount / interval) * 100);
+  });
+
+  const highestPercentage = Math.max(...percentages);
+  const highestIntervalIndex = percentages.indexOf(highestPercentage);
+  const highestInterval = intervals[highestIntervalIndex];
+  const isPercentageOdd = highestPercentage % 2 !== 0;
+  const barColor = isPercentageOdd ? "green" : "red";
+  const isRising = highestInterval === intervals[intervals.length - 1];
+
+  // Generate the bar chart
+  const barChart = intervals.reduce((chart, interval) => {
+    const color = interval === highestInterval ? barColor : "grey";
+    const bar = "=".repeat(interval / 10);
+    return chart + `[${bar.padEnd(10, " ")}]`.fontcolor(color);
+  }, "");
+
+  const recommendation = isRising
+    ? "Go up"
+    : "Go down";
+
+  console.log(`Highest Percentage: ${highestPercentage}%`);
+  console.log(`Highest Interval: ${highestInterval}`);
+  console.log(`Recommendation: ${recommendation}`);
+  console.log(`Bar Chart: ${barChart}`);
+}
+
+// Make a request to Deriv API for ticks data
+async function getTicksData(token) {
+  const requestUrl = `${apiEndpoint}?${jsonToQueryString({ ticks_history: symbol, subscribe: 1, granularity: intervalDuration, end: "latest", count: Math.max(...intervals) })}`;
+  const response = await fetch(requestUrl, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const responseJson = await response.json();
+  return responseJson.history.ticks;
+}
+
+async function main() {
+  rl.question('Please enter your Deriv API token: ', async (token) => {
+    const ticksData = await getTicksData(token);
+    analyzeTicksData(ticksData);
+    rl.close();
+  });
+}
+
+main();
